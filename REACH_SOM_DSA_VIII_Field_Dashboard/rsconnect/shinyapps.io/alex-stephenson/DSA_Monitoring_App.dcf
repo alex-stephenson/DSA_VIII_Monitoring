@@ -1,0 +1,12 @@
+name: DSA_Monitoring_App
+title: SOM_DSA_VIII_Field_Dashboard
+username: alex-stephenson
+account: alex-stephenson
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 13153120
+bundleId:
+url: https://alex-stephenson.shinyapps.io/DSA_Monitoring_App/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE

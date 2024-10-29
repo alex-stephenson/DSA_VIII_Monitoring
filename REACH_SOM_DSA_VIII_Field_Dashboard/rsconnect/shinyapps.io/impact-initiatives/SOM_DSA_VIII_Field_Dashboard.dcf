@@ -1,0 +1,12 @@
+name: SOM_DSA_VIII_Field_Dashboard
+title: REACH_SOM_DSA_VIII_Field_Dashboard
+username: impact-initiatives
+account: impact-initiatives
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 13164590
+bundleId: 9284792
+url: https://impact-initiatives.shinyapps.io/SOM_DSA_VIII_Field_Dashboard/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
