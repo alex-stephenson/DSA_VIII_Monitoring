@@ -11,7 +11,7 @@ library(reactable)
 library(leaflet)
 library(sf)
 library(base64enc)
-
+library(reactablefmtr)
 
 # Load the data from the Excel file
 clogs_path <- "data/combined_clogs.xlsx"
@@ -141,10 +141,7 @@ sites_with_coords <- read_excel(site_file_path, sheet = "CCCM IDP Site List (Ver
 
 # Site level Data
 
-site_list %>%
-  colnames()
-
-### geo data
+## geo data
 
 
 shp_path <- "data/gis_data/som_admbnda_adm2_ocha_20230308.shp"
@@ -267,7 +264,7 @@ ui <- dashboardPage(
       tabItem(tabName = "clogs_data",
               fluidRow(
                 box(width = 2,
-                    selectInput("fo", "Field Officer:", choices = c("All", unique(clogs_table$Responsible_FO)), selected = "All")
+                    selectInput("fo_clogs", "Field Officer:", choices = c("All", unique(clogs_table$Responsible_FO)), selected = "All")
                 ),
                 box(width = 10, title = "Clogs Data Overview", status = "primary", solidHeader = TRUE, reactableOutput("clogs_table"))
               ),
@@ -290,23 +287,32 @@ ui <- dashboardPage(
   )
 )
 
-color_palette <- colorNumeric(palette = c("lightblue", "darkblue"), 
-                              domain = regions_sf$Survey_Percent)
+
 
 server <- function(input, output, session) {
   # Filtered District List table
   output$district_table <- renderReactable({
+    
+    District_List_table_df <- District_List %>%
+      filter(Region == input$region | input$region == "All") %>%
+      filter(Responsible_FO == input$fo| input$fo == "All") %>%
+      select(Region, District, Responsible_FO, Survey_ratio, Survey_Percent) %>%
+      mutate(Survey_Percent = (Survey_Percent * 100),
+             `% Complete` = round(Survey_Percent, 1)) %>%
+      select(-c(Survey_Percent))
+      
 
+#    color_palette <- colorNumeric(palette = c("lightblue", "darkblue"), 
+#                                  domain = District_List_table_df$Survey_Percent)
+  
     reactable(
-      (district_with_fo %>%
-        filter(Region == input$region | input$region == "All") %>%
-        filter(Responsible_FO == input$fo| input$fo == "All")),
+      District_List_table_df,
       defaultColDef = colDef(
-        cell = data_bars(district_with_fo,
+        cell = data_bars(District_List_table_df,
                          text_position = "outside-base",
                          max_value = 100)
       )
-    )
+    ) 
 
   })
   
@@ -334,20 +340,6 @@ server <- function(input, output, session) {
     # Update the district select input
     updateSelectInput(session, "fo", choices = c("All", fos))
   })
-  
-  observeEvent(input$fo, {
-    # Filter districts based on the selected field officer
-    districts <- if (input$fo == "All") {
-      unique(site_list$District)  # Show all districts
-    } else {
-      unique(site_list$District[site_list$Responsible_FO == input$fo])  # Filter districts by selected FO
-    }
-    
-    # Update the district select input
-    updateSelectInput(session, "district", choices = c("All", districts))
-  })
-  
-
 
   
   output$site_data <- renderReactable({
@@ -361,11 +353,34 @@ server <- function(input, output, session) {
     
   })
   
+  observeEvent(input$region_site, {
+    # Filter districts based on the selected region
+    districts <- if (input$region_site == "All") {
+      unique(site_list$District)  # Show all districts
+    } else {
+      unique(site_list$District[site_list$Region == input$region_site])  # Filter districts by selected region
+    }
+    
+    # Update the district select input
+    updateSelectInput(session, "district_site", choices = c("All", districts))
+  })
+  
+  observeEvent(input$fo_site, {
+    # Filter districts based on the selected field officer
+    districts <- if (input$fo_site == "All") {
+      unique(site_list$District)  # Show all districts
+    } else {
+      unique(site_list$District[site_list$Responsible_FO == input$fo_site])  # Filter districts by selected FO
+    }
+    
+    # Update the district select input
+    updateSelectInput(session, "district_site", choices = c("All", districts))
+  })
   
   # Filtered Clogs table
   output$clogs_table <- renderReactable({
     clogs_table %>%
-      filter((Responsible_FO == input$fo | input$fo == "All")) %>%
+      filter((Responsible_FO == input$fo_clogs | input$fo_clogs == "All")) %>%
       #      filter((Region == input$region | input$region == "All")) %>%
       select(Responsible_FO, Pending_Clogs, Complete_Clogs) %>%
       reactable()
@@ -375,7 +390,7 @@ server <- function(input, output, session) {
   
   output$clogs_detailed <- renderReactable({
     clogs %>%
-      filter((Responsible_FO == input$fo | input$fo == "All")) %>%
+      filter((Responsible_FO == input$fo_clogs | input$fo_clogs == "All")) %>%
       reactable()
   })  
   
@@ -389,6 +404,11 @@ server <- function(input, output, session) {
       theme_minimal()
   })
   
+  
+  
+  color_palette <- colorNumeric(palette = c("lightblue", "darkblue"), 
+                                domain = c(0,0.1))
+  
   output$region_map <- renderLeaflet({
     # Set the domain for the color scale based on Survey_Percent
     
@@ -400,7 +420,7 @@ server <- function(input, output, session) {
         color = "darkblue",
         weight = 1,
         opacity = 0.8,
-        fillOpacity = 0.4,
+        fillOpacity = 0.7,
         label = ~paste0("District: ", ADM2_EN, r"(.  )", "Surveys Complete: ", Survey_ratio),
         highlightOptions = highlightOptions(
           color = "white",
