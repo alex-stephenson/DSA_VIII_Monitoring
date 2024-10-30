@@ -120,8 +120,8 @@ region_pct_done <- District_List %>%
   mutate(region_pct_done = (Count_Region_Surv_Done / Count_Region_Surv_Total)*100) %>%
   ungroup()
 
-District_List <- District_List %>%
-  left_join(region_pct_done, by = c("Region"))
+#District_List <- District_List %>%
+#  left_join(region_pct_done, by = c("Region"))
 
 
 # Process "Site List" sheet
@@ -132,13 +132,17 @@ site_list <- sites_for_field %>%
   rename(Surveys_Per_Site = Count,
          Total_Surveys = `#_Surveys`) %>%
   mutate(Surveys_Per_Site = ifelse(is.na(Surveys_Per_Site), 0, Surveys_Per_Site),
-         Sites_Visited_Ratio = paste0(Surveys_Per_Site, " / ", Total_Surveys))
+         Surveys_Complete = paste0(Surveys_Per_Site, " / ", Total_Surveys))
 
 
 # Final processing on Sites with Coordinates
 sites_with_coords <- read_excel(site_file_path, sheet = "CCCM IDP Site List (Verified)") %>%
   filter(Sampled == "To visit")
 
+# Site level Data
+
+site_list %>%
+  colnames()
 
 ### geo data
 
@@ -161,6 +165,7 @@ ui <- dashboardPage(
     sidebarMenu(
       menuItem("Overview", tabName = "overview", icon = icon("dashboard")),
       menuItem("District Data", tabName = "district_data", icon = icon("table")),
+      menuItem("Site Data", tabName = "site_data", icon = icon("tent")),
       menuItem("Clogs Data", tabName = "clogs_data", icon = icon("exclamation-triangle")),
       menuItem("Survey Locations", tabName = "survey_locations", icon = icon("map-marker-alt")),
       menuItem("Enumerator Responses", tabName = "enum_responses", icon = icon("bar-chart"))
@@ -234,7 +239,7 @@ ui <- dashboardPage(
                     selectInput("region", "Select Region:", choices = c("All", unique(District_List$Region)), selected = "All")
                 ),
                 box(width = 3,
-                    selectInput("fo", "Field Officer:", choices = c("All", unique(District_List$Responsible_FO.x)), selected = "All")
+                    selectInput("fo", "Field Officer:", choices = c("All", unique(District_List$Responsible_FO)), selected = "All")
                 )
               ),
               fluidRow(
@@ -242,6 +247,23 @@ ui <- dashboardPage(
                 box(width = 6, title = "Region", leafletOutput("region_map"))
               )
       ),
+    tabItem(tabName = "site_data",
+            fluidRow(
+              box(width = 3,
+                  selectInput("region_site", "Select Region:", choices = c("All", unique(District_List$Region)), selected = "All")
+              ),
+              box(width = 3,
+                  selectInput("fo_site", "Field Officer:", choices = c("All", unique(District_List$Responsible_FO)), selected = "All")
+              ),
+              box(width = 3,
+                  selectInput("district_site", "District:", choices = c("All", unique(site_list$District)), selected = "All")
+              )
+            ),
+            fluidRow(
+              box(width = 12, title = "Site Data", status = "primary", solidHeader = TRUE, reactableOutput("site_data"))
+            )
+    ),   
+    
       tabItem(tabName = "clogs_data",
               fluidRow(
                 box(width = 2,
@@ -274,17 +296,71 @@ color_palette <- colorNumeric(palette = c("lightblue", "darkblue"),
 server <- function(input, output, session) {
   # Filtered District List table
   output$district_table <- renderReactable({
-    District_List %>%
-      left_join(fo_data, by = c("District" = "Locations")) %>%
-        # fo_data %>%
-        #           mutate(Locations = case_when(
-        #             Locations %in% c("Mogadishu Dayniile", "Mogadishu Khada") ~ "Banadir", 
-        #             .default = Locations)), by = c("District" = "Locations")) %>%
-      select(Region, District, Survey_ratio, Responsible_FO) %>%
-      filter((Region == input$region | input$region == "All")) %>%
-      filter(Responsible_FO == input$fo| input$fo == "All") %>%
-      reactable()
+
+    reactable(
+      (district_with_fo %>%
+        filter(Region == input$region | input$region == "All") %>%
+        filter(Responsible_FO == input$fo| input$fo == "All")),
+      defaultColDef = colDef(
+        cell = data_bars(district_with_fo,
+                         text_position = "outside-base",
+                         max_value = 100)
+      )
+    )
+
   })
+  
+  
+  observeEvent(input$region, {
+    # Filter districts based on the selected region
+    districts <- if (input$region == "All") {
+      unique(site_list$District)  # Show all districts
+    } else {
+      unique(site_list$District[site_list$Region == input$region])  # Filter districts by selected region
+    }
+    
+    # Update the district select input
+    updateSelectInput(session, "district", choices = c("All", districts))
+  })
+  
+  observeEvent(input$region, {
+    # Filter districts based on the selected field officer
+    fos <- if (input$region == "All") {
+      unique(site_list$Responsible_FO)  # Show all districts
+    } else {
+      unique(site_list$Responsible_FO[site_list$Region == input$region])  # Filter districts by selected FO
+    }
+    
+    # Update the district select input
+    updateSelectInput(session, "fo", choices = c("All", fos))
+  })
+  
+  observeEvent(input$fo, {
+    # Filter districts based on the selected field officer
+    districts <- if (input$fo == "All") {
+      unique(site_list$District)  # Show all districts
+    } else {
+      unique(site_list$District[site_list$Responsible_FO == input$fo])  # Filter districts by selected FO
+    }
+    
+    # Update the district select input
+    updateSelectInput(session, "district", choices = c("All", districts))
+  })
+  
+
+
+  
+  output$site_data <- renderReactable({
+    reactable(
+      (site_list %>% select(CCCM_IDP_Site_Code, IDP_Site, Region, District, Responsible_FO, Surveys_Complete) %>%
+         rename(Site_Name = CCCM_IDP_Site_Code) %>%
+         filter(Region == input$region_site | input$region_site == "All") %>% ## change filters here
+         filter(Responsible_FO == input$fo_site| input$fo_site == "All") %>%
+         filter(District == input$district_site | input$district_site == "All")
+    ))
+    
+  })
+  
   
   # Filtered Clogs table
   output$clogs_table <- renderReactable({
