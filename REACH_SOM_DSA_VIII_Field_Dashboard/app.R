@@ -246,6 +246,7 @@ ui <- dashboardPage(
       ),
     tabItem(tabName = "site_data",
             fluidRow(
+              box(width = 3, textInput("sb", "Search IDP Site:", placeholder = "Site Name")),
               box(width = 3,
                   selectInput("region_site", "Select Region:", choices = c("All", unique(District_List$Region)), selected = "All")
               ),
@@ -346,6 +347,7 @@ server <- function(input, output, session) {
     reactable(
       (site_list %>% select(CCCM_IDP_Site_Code, IDP_Site, Region, District, Responsible_FO, Surveys_Complete) %>%
          rename(Site_Name = CCCM_IDP_Site_Code) %>%
+         filter(grepl(input$sb, IDP_Site, ignore.case = TRUE)) %>%
          filter(Region == input$region_site | input$region_site == "All") %>% ## change filters here
          filter(Responsible_FO == input$fo_site| input$fo_site == "All") %>%
          filter(District == input$district_site | input$district_site == "All")
