@@ -10,7 +10,6 @@ library(ggplot2)
 library(reactable)
 library(leaflet)
 library(sf)
-library(base64enc)
 library(reactablefmtr)
 
 # Load the data from the Excel file
@@ -50,7 +49,7 @@ dashboard_data <- dashboard_data %>%
   mutate(across(c(start, end, today), as.POSIXct),
          across(c(deviceid, Responsible_FO, enum_name, consent, district_name, localisation_region_label, idp_code, idp_site, idp_code_verification, 
                   idp_code_districti_verification, ki_role, ki_role_other, ki_gender), as.character),
-         across(c(`X_observation_gps_latitude`, `X_observation_gps_longitude`), as.numeric))
+         across(c(`X_geopoint_latitude`, `X_geopoint_longitude`), as.numeric))
 
 # Section 5: Group dashboard data by region
 dashboard_data_grouped_region <- dashboard_data %>%
@@ -59,6 +58,9 @@ dashboard_data_grouped_region <- dashboard_data %>%
 
 # Section 6: Group dashboard data by district
 dashboard_data_grouped_district <- dashboard_data %>%
+  # mutate(district_name = case_when(
+  #   district_name %in% c("Mogadishu Dayniile", "Mogadishu Khada") ~ "Banadir", .default = district_name)
+  # ) %>%
   group_by(district_name) %>%
   summarise(Survey_Per_District = n(), .groups = 'drop')  # Count surveys per district
 
@@ -75,9 +77,9 @@ fo_data <- read_excel(fo_data_file_path, sheet = "Sheet1") %>%
 # Load "Sites for Field" sheet and format columns
 sites_for_field <- read_excel(site_file_path, sheet = "CCCM IDP Site List (Verified)") %>%
   filter(Sampled == "To visit") %>%
-  mutate(District = case_when(
-    District %in% c("Mogadishu Dayniile", "Mogadishu Khada") ~ "Banadir", .default = District)
-  ) %>% 
+  # mutate(District = case_when(
+  #   District %in% c("Mogadishu Dayniile", "Mogadishu Khada") ~ "Banadir", .default = District)
+  # ) %>% 
   select(-c("Source (Q1-2024)", "SWState Y/N")) %>%
   rename_with(~ gsub(" ", "_", .)) %>%
   mutate(across(c(CCCM_IDP_Site_Code, Region, District, IDP_Site, Neighbourhood, Neighbourhood_Type, Site_Accessible, Excluded_based_on_HH_Size, Sampled), as.character),
@@ -104,7 +106,7 @@ District_List <- sites_for_field %>%
 
 # Join with other tables and create custom columns
 District_List <- District_List %>%
-  left_join(dashboard_data_grouped_district, by = c("District" = "district_name")) %>%
+  left_join(dashboard_data_grouped_district, by = c("District" = "district_name")) %>% 
   rename(Surveys_Complete = Survey_Per_District) %>%
   mutate(Surveys_Complete = replace_na(Surveys_Complete, 0),
          Total_Surveys = Total_Sites * 3,
@@ -132,14 +134,29 @@ site_list <- sites_for_field %>%
   rename(Surveys_Per_Site = Count,
          Total_Surveys = `#_Surveys`) %>%
   mutate(Surveys_Per_Site = ifelse(is.na(Surveys_Per_Site), 0, Surveys_Per_Site),
-         Surveys_Complete = paste0(Surveys_Per_Site, " / ", Total_Surveys))
+         Surveys_Complete = paste0(Surveys_Per_Site, " / ", Total_Surveys)) %>%
+  mutate(Responsible_FO = case_when(Region == "Banadir" ~ "Suleiman Mohamed", .default = Responsible_FO))
+
+
+## IVs per site
+ivs_per_site <- dashboard_data %>%
+  select(idp_code, idp_site, ki_role) %>%
+  group_by(idp_code) %>%
+  summarise(KIs_ivd = paste0(ki_role, collapse = ", "))
+
 
 
 # Final processing on Sites with Coordinates
 sites_with_coords <- read_excel(site_file_path, sheet = "CCCM IDP Site List (Verified)") %>%
   filter(Sampled == "To visit")
 
-# Site level Data
+# calculate the enumerator stats
+
+enum_remove_survey <- clogs %>%
+  filter(change_type == "remove_survey") %>%
+  group_by(Responsible_FO, enum_name) %>%
+  summarise(surveys_deleted = n())
+
 
 ## geo data
 
@@ -187,7 +204,7 @@ ui <- dashboardPage(
       }
       /* Overview tab background styling */
       .overview-background {
-        background-image: url('https://www.impact-initiatives.org/wp-content/uploads/2018/07/header1.jpg');
+        background-image: url('https://www.unhcr.org/sites/default/files/2023-09/618257db4.jpg');
         background-size: cover;
         background-position: center;
         color: white;
@@ -246,15 +263,18 @@ ui <- dashboardPage(
       ),
     tabItem(tabName = "site_data",
             fluidRow(
-              box(width = 3, textInput("sb", "Search IDP Site:", placeholder = "Site Name")),
-              box(width = 3,
+              box(width = 2, textInput("sb", "Search IDP Site:", placeholder = "Site Name")),
+              box(width = 2,
                   selectInput("region_site", "Select Region:", choices = c("All", unique(District_List$Region)), selected = "All")
               ),
-              box(width = 3,
+              box(width = 2,
                   selectInput("fo_site", "Field Officer:", choices = c("All", unique(District_List$Responsible_FO)), selected = "All")
               ),
-              box(width = 3,
+              box(width = 2,
                   selectInput("district_site", "District:", choices = c("All", unique(site_list$District)), selected = "All")
+              ),
+              box(width = 2,
+                  selectInput("surveys_complete", "Surveys Complete:", choices = c("All", unique(site_list$Surveys_Complete)), selected = "All")
               )
             ),
             fluidRow(
@@ -264,10 +284,10 @@ ui <- dashboardPage(
     
       tabItem(tabName = "clogs_data",
               fluidRow(
-                box(width = 2,
+                box(width = 3,
                     selectInput("fo_clogs", "Field Officer:", choices = c("All", unique(clogs_table$Responsible_FO)), selected = "All")
                 ),
-                box(width = 10, title = "Clogs Data Overview", status = "primary", solidHeader = TRUE, reactableOutput("clogs_table"))
+                box(width = 6, title = "Clogs Data Overview", status = "primary", solidHeader = TRUE, reactableOutput("clogs_table"))
               ),
               fluidRow(
                 box(width = 12, title = "Clogs Data Detailed", status = "primary", solidHeader = TRUE, reactableOutput("clogs_detailed"))
@@ -282,6 +302,10 @@ ui <- dashboardPage(
       tabItem(tabName = "enum_responses",
               fluidRow(
                 box(width = 12, title = "Enumerator Responses", status = "primary", solidHeader = TRUE, plotOutput("enum_response_chart"))
+              ),
+              fluidRow(
+                box(width = 12, title = "Enumerator Survevys Deleted", status = "primary", solidHeader = TRUE, plotOutput("enum_deleted"))
+                
               )
       )
     )
@@ -295,6 +319,9 @@ server <- function(input, output, session) {
   output$district_table <- renderReactable({
     
     District_List_table_df <- District_List %>%
+       mutate(
+        Responsible_FO = case_when(Region == "Banadir" ~ "Suleiman Mohamed", .default = Responsible_FO 
+       )) %>%
       filter(Region == input$region | input$region == "All") %>%
       filter(Responsible_FO == input$fo| input$fo == "All") %>%
       select(Region, District, Responsible_FO, Survey_ratio, Survey_Percent) %>%
@@ -344,16 +371,50 @@ server <- function(input, output, session) {
 
   
   output$site_data <- renderReactable({
-    reactable(
-      (site_list %>% select(CCCM_IDP_Site_Code, IDP_Site, Region, District, Responsible_FO, Surveys_Complete) %>%
-         rename(Site_Name = CCCM_IDP_Site_Code) %>%
-         filter(grepl(input$sb, IDP_Site, ignore.case = TRUE)) %>%
-         filter(Region == input$region_site | input$region_site == "All") %>% ## change filters here
-         filter(Responsible_FO == input$fo_site| input$fo_site == "All") %>%
-         filter(District == input$district_site | input$district_site == "All")
-    ))
+    # Filter and select columns as before
+    filtered_data <- site_list %>%
+      select(Site_Name = CCCM_IDP_Site_Code, IDP_Site, Region, District, Responsible_FO, Surveys_Complete) %>%
+      filter(grepl(input$sb, IDP_Site, ignore.case = TRUE)) %>%
+      filter(Region == input$region_site | input$region_site == "All") %>%
+      filter(Responsible_FO == input$fo_site | input$fo_site == "All") %>%
+      filter(Surveys_Complete == input$surveys_complete | input$surveys_complete == "All") %>%
+      filter(District == input$district_site | input$district_site == "All")
     
+    reactable(
+      filtered_data,
+      details = function(index) {
+        # Use the index to look up the Site_Name (or idp_code) for this row
+        idp_code <- filtered_data$Site_Name[index]
+        
+        # Filter ivs_per_site for this idp_code
+        details_data <- ivs_per_site %>% filter(idp_code == !!idp_code)
+        
+        # Render expandable details if data exists
+        if (nrow(details_data) > 0) {
+          reactable(
+            details_data,
+            columns = list(
+              idp_code = colDef(name = "IDP Code", width = 250),
+              KIs_ivd = colDef(name = "KI Roles", width = 800)
+            )
+          )
+        } else {
+          NULL
+        }
+      },
+      columns = list(
+        Site_Name = colDef(name = "Site Name"),
+        IDP_Site = colDef(name = "IDP Site"),
+        Region = colDef(name = "Region"),
+        District = colDef(name = "District"),
+        Responsible_FO = colDef(name = "Responsible FO"),
+        Surveys_Complete = colDef(name = "Surveys Complete")
+      )
+    )
   })
+  
+  
+  
   
   observeEvent(input$region_site, {
     # Filter districts based on the selected region
@@ -393,23 +454,60 @@ server <- function(input, output, session) {
   output$clogs_detailed <- renderReactable({
     clogs %>%
       filter((Responsible_FO == input$fo_clogs | input$fo_clogs == "All")) %>%
-      reactable()
+      reactable(
+        filterable = TRUE
+      )
   })  
   
   # Enumerator Responses bar chart
   output$enum_response_chart <- renderPlot({
     dashboard_data %>%
       filter(localisation_region_label == input$region | input$region == "All") %>%
-      ggplot(aes(x = enum_name, fill = localisation_region_label)) +
-      geom_bar() +
-      labs(x = "Enum Code", y = "Count", fill = "Region") +
-      theme_minimal()
+      count(enum_name, localisation_region_label, name = "survey_count") %>%
+      arrange(localisation_region_label, survey_count) %>%
+      ggplot(aes(x = factor(enum_name, levels = enum_name), y = survey_count, fill = localisation_region_label)) +
+      geom_bar(stat = "identity") +
+      geom_text(aes(label = enum_name), vjust = -0.3, size = 3, angle = 90) +
+      ggtitle("Count of Surveys Completed by Enumerator") +
+      labs(x = NULL, y = "Count", fill = "Region") +
+      scale_y_continuous(breaks = scales::pretty_breaks(n = 10), labels = scales::label_number(accuracy = 1)) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_blank(), # Hide x-axis labels
+        axis.title.x = element_blank(),
+        panel.grid.minor = element_blank(), # Remove minor grid lines
+        panel.grid.major.x = element_blank() # Remove vertical grid lines
+      )
   })
   
+  output$enum_deleted <- renderPlot({
+    enum_remove_survey %>%
+      ggplot(aes(x = enum_name, y = surveys_deleted)) +
+      geom_bar() +
+      ggtitle("Count of Surveys deleted by each enumerator") +
+      facet_wrap(~Responsible_FO) +
+      theme_minimal()
+
+      })
+
+  
+
   
   
-  color_palette <- colorNumeric(palette = c("lightblue", "darkblue"), 
-                                domain = c(0,0.1))
+  
+  
+  color_palette <- function(value) {
+    ifelse(
+      is.na(value), 
+      "grey", # Assign grey for NA values
+      ifelse(
+        value >= 1, 
+        "forestgreen", 
+        colorRampPalette(c("lightblue", "darkblue"))(100)[floor(value * 99) + 1]
+      )
+    )
+  }
+  
   
   output$region_map <- renderLeaflet({
     # Set the domain for the color scale based on Survey_Percent
@@ -418,11 +516,11 @@ server <- function(input, output, session) {
     leaflet(data = regions_sf) %>%
       addTiles() %>%
       addPolygons(
-        fillColor = ~color_palette(Survey_Percent), # Use the color scale
+        fillColor = ~sapply(Survey_Percent, color_palette), # Use the color scale
         color = "darkblue",
         weight = 1,
         opacity = 0.8,
-        fillOpacity = 0.7,
+        fillOpacity = 0.85,
         label = ~paste0("District: ", ADM2_EN, r"(.  )", "Surveys Complete: ", Survey_ratio),
         highlightOptions = highlightOptions(
           color = "white",
@@ -438,8 +536,8 @@ server <- function(input, output, session) {
     leaflet(data = dashboard_data) %>%
       addTiles() %>%
       addCircleMarkers(
-        ~X_observation_gps_longitude,
-        ~X_observation_gps_latitude,
+        ~X_geopoint_longitude,
+        ~X_geopoint_latitude,
         radius = 2,
         color = "blue",
         fillOpacity = 0.6,
@@ -450,8 +548,3 @@ server <- function(input, output, session) {
 }
 
 shinyApp(ui, server)
-
-
-
-
-
